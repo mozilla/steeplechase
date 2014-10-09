@@ -35,6 +35,12 @@ class Options(OptionParser):
         self.add_option("--binary2",
                         action="store", type="string", dest="binary2",
                         help="path to application for client 2. defaults to BINARY")
+        self.add_option("--package",
+                        action="store", type="string", dest="package",
+                        help="path to application package (either this or --binary required")
+        self.add_option("--package2",
+                        action="store", type="string", dest="package2",
+                        help="path to application package for client 2. defaults to PACKAGE")
         self.add_option("--html-manifest",
                         action="store", type="string", dest="html_manifest",
                         help="Manifest of HTML tests to run")
@@ -109,6 +115,107 @@ class RunThread(threading.Thread):
             cond.notify()
             cond.release()
             del self.args
+
+class ApplicationAsset(object):
+    def __init__(self, path, remote_path, log, dm):
+        self.path = path
+        self.remote_path = os.path.join(remote_path)
+        self.log = log
+        self.dm = dm
+
+    def setup_client(self):
+        print "Implement push_to_client"
+
+    def path_to_launch(self):
+        print "Implement path_to_launch"
+
+
+class Binary(ApplicationAsset):
+# Note that the legacy --binary gives the full path to the core firefox binary. This does not work on MacOS (now),
+# but is great for Linux and Windows.
+
+    def setup_client(self):
+        self.log.debug("Pushing %s to %s..." % (self.path, self.remote_path))
+        self.dm.mkDir(self.remote_path)
+        self.dm.pushDir(os.path.dirname(self.path), self.remote_path)
+
+    def path_to_launch(self):
+        app = os.path.basename(self.path)
+        return os.path.join(self.remote_path, app)
+
+class Package(ApplicationAsset):
+
+    def archive_name(self):
+        return os.path.basename(self.path)
+
+    def remote_archive_name(self):
+        return os.path.join(self.remote_path, self.archive_name())
+
+    def push(self):
+        self.log.debug("Pushing %s to %s..." % (self.path, self.remote_path))
+        self.dm.mkDir(self.remote_path)
+        self.dm.pushFile(self.path, self.remote_archive_name())
+
+    def setup_client(self):
+        self.push()
+        self.unpack()
+
+    def path_to_launch(self):
+        print 'implement path_to_launch...'
+
+class TarBz2(Package):
+
+    def unpack(self):
+        cmd = ['cd', self.remote_path, ';', 'tar', 'xjf', self.remote_archive_name()]
+        self.log.debug("Running %s on remote host.." % cmd)
+        output = self.dm.shellCheckOutput(cmd, env=None)
+
+    def path_to_launch(self):
+        return os.path.join(self.remote_path, 'firefox', 'firefox')
+
+class Zip(Package):
+
+    def unpack(self):
+        cmd = ['unzip', '-u', '-o', '-d', self.remote_path, self.remote_archive_name()]
+        self.log.debug("Running %s on remote host.." % cmd)
+        output = self.dm.shellCheckOutput(cmd, env=None)
+
+    def path_to_launch(self):
+        return os.path.join(self.remote_path, 'firefox', 'firefox.exe')
+
+class Dmg(Package):
+
+    def unpack(self):
+        umount_cmd = ['umount', '/Volumes/Steeplechase']
+        self.log.debug("Running %s on remote host.." % umount_cmd)
+        try:
+            output = self.dm.shellCheckOutput(umount_cmd, env=None)
+        except Exception as ex:
+            self.log.info("EXPECTED: umount failed with %" % ex)
+        cmd = ['hdiutil', 'attach', '-quiet', '-mountpoint', '/Volumes/Steeplechase', self.remote_archive_name()]
+        self.log.info("Running %s on remote host.." % cmd)
+        output = self.dm.shellCheckOutput(cmd, env=None)
+        cmd = ['cp', '-r', '/Volumes/Steeplechase/*.app', os.path.join(self.remote_path, 'firefox.app')]
+        self.log.info("Running %s on remote host.." % cmd)
+        output = self.dm.shellCheckOutput(cmd, env=None)
+        self.log.info("Running %s on remote host.." % umount_cmd)
+        output = self.dm.shellCheckOutput(umount_cmd, env=None)
+
+    def path_to_launch(self):
+        return os.path.join(self.remote_path, 'firefox.app', 'Contents', 'MacOS', 'firefox')
+
+def generate_package_asset(path, remote_path, log, dm):
+    asset = None
+    base, ext = os.path.splitext(path)
+    if ext == '.zip':
+        asset = Zip(path, remote_path, log, dm)
+    elif ext == '.dmg':
+        asset = Dmg(path, remote_path, log, dm)
+    elif ext == '.bz2':
+        real_base, ext2 = os.path.splitext(base)
+        if ext2 == ".tar":
+            asset = TarBz2(path, remote_path, log, dm)
+    return asset
 
 class HTMLTests(object):
     def __init__(self, httpd, remote_info, log, options):
@@ -212,18 +319,46 @@ class HTMLTests(object):
 def main(args):
     parser = Options()
     options, args = parser.parse_args()
-    if not options.html_manifest or not options.binary or not options.specialpowers or not options.host1 or not options.host2 or not options.signalling_server:
+    if not options.html_manifest or not options.specialpowers or not options.host1 or not options.host2 or not options.signalling_server:
         parser.print_usage()
         return 2
 
-    if not os.path.isfile(options.binary):
-        parser.error("Binary %s does not exist" % options.binary)
+    if not options.binary and not options.package:
+        parser.print_usage()
         return 2
-    if not options.binary2:
-        options.binary2 = options.binary
-    if not os.path.isfile(options.binary2):
-        parser.error("Binary %s does not exist" % options.binary2)
+
+    if options.binary and options.package:
+        parser.print_usage()
         return 2
+
+    if options.binary:
+        if not options.binary2 and not options.package2:
+            options.binary2 = options.binary
+
+    if options.package:
+        if not options.binary2 and not options.package2:
+            options.package2 = options.package
+
+    if options.binary:
+        if not os.path.isfile(options.binary):
+            parser.error("Binary %s does not exist" % options.binary)
+            return 2
+
+    if options.binary2:
+        if not os.path.isfile(options.binary2):
+            parser.error("Binary %s does not exist" % options.binary2)
+            return 2
+
+    if options.package:
+        if not os.path.isfile(options.package):
+            parser.error("Package %s does not exist" % options.package)
+            return 2
+
+    if options.package2:
+        if not os.path.isfile(options.package2):
+            parser.error("Package %s does not exist# % options.package2")
+            return 2
+
     if not os.path.isdir(options.specialpowers):
         parser.error("SpecialPowers directory %s does not exist" % options.specialpowers)
         return 2
@@ -248,28 +383,35 @@ def main(args):
         dm2 = DeviceManagerSUT(options.host2)
     remote_info = [{'dm': dm1,
                     'binary': options.binary,
+                    'package': options.package,
                     'is_initiator': True,
                     'name': 'Client 1'},
                    {'dm': dm2,
                     'binary': options.binary2,
+                    'package': options.package2,
                     'is_initiator': False,
                     'name': 'Client 2'}]
     # first, push app
     for info in remote_info:
         dm = info['dm']
-        test_root = dm.getDeviceRoot() + "/steeplechase"
+        test_root = os.path.join(dm.getDeviceRoot(), "steeplechase")
+        remote_app_dir = os.path.join(test_root, "app")
+
         if options.setup:
             if dm.dirExists(test_root):
                 dm.removeDir(test_root)
             dm.mkDir(test_root)
         info['test_root'] = test_root
-        app_path = info['binary']
-        remote_app_dir = test_root + "/app"
+
+        if info['binary']:
+            asset = Binary(path=info['binary'], remote_path=remote_app_dir, log=log, dm=info['dm'])
+        else:
+            asset = generate_package_asset(path=info['package'], remote_path=remote_app_dir, log=log, dm=info['dm'])
+
         if options.setup:
             log.info("Pushing app to %s...", info["name"])
-            dm.mkDir(remote_app_dir)
-            dm.pushDir(os.path.dirname(app_path), remote_app_dir)
-        info['remote_app_path'] = remote_app_dir + "/" + os.path.basename(app_path)
+            asset.setup_client()
+        info['remote_app_path'] = asset.path_to_launch()
         if not options.setup and not dm.fileExists(info['remote_app_path']):
             log.error("App does not exist on %s, don't use --noSetup", info['name'])
             return 2
