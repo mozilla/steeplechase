@@ -191,7 +191,7 @@ class Dmg(Package):
         try:
             output = self.dm.shellCheckOutput(umount_cmd, env=None)
         except Exception as ex:
-            self.log.info("EXPECTED: umount failed with %" % ex)
+            self.log.info("EXPECTED: umount failed with %s" % ex)
         cmd = ['hdiutil', 'attach', '-quiet', '-mountpoint', '/Volumes/Steeplechase', self.remote_archive_name()]
         self.log.info("Running %s on remote host.." % cmd)
         output = self.dm.shellCheckOutput(cmd, env=None)
