@@ -150,7 +150,7 @@ function run_next_test() {
   }
   current_window.addEventListener("error", harness_error);
   current_window.addEventListener("load", function() {
-    dump("loaded\n");
+    dump("loaded " + path + "\n");
     send_message({"action": "test_loaded", "test": path});
     // Wait for other side to have loaded this test.
     wait_for_message().then(function (m) {
