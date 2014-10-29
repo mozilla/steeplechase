@@ -21,6 +21,7 @@ import re
 import sys
 import threading
 import uuid
+import posixpath
 
 class Options(OptionParser):
     def __init__(self, **kwargs):
@@ -117,103 +118,140 @@ class RunThread(threading.Thread):
             del self.args
 
 class ApplicationAsset(object):
-    def __init__(self, path, remote_path, log, dm):
-        self.path = path
-        self.remote_path = remote_path
-        self.log = log
-        self.dm = dm
+    """A class for handling the binaries or packages to be installed and run by steeplechase"""
+
+    def __init__(self, path, log, dm):
+        self._path = path
+        self._log = log
+        self._dm = dm
+        self._test_root = posixpath.join(dm.getDeviceRoot(), "steeplechase")
+        self._remote_path = posixpath.join(self._test_root, "app")
+
+    def remote_path(self):
+        return self._remote_path
+
+    def test_root(self):
+        return self._test_root
+
+    def setup_test_root(self):
+        if self._dm.dirExists(self._test_root):
+            self._dm.removeDir(self._test_root)
+        self._dm.mkDir(self._test_root)
 
     def setup_client(self):
+        """Copy and do any unarchiving of the binaries or packages on the client"""
         raise NotImplementedError('Implement setup_client()')
 
     def path_to_launch(self):
+        """Return the path to the firefox executable on the remote machine"""
         raise NotImplementedError('Implement path_to_launch()')
 
 class Binary(ApplicationAsset):
-# Note that the legacy --binary gives the full path to the core firefox binary. This does not work on MacOS (now),
-# but is great for Linux and Windows.
+    """Copy a directory containing firefox to the client. Note that this does not work in versions of Mac
+       Firefox with the v2 application layout."""
 
     def setup_client(self):
-        self.log.debug("Pushing %s to %s..." % (self.path, self.remote_path))
-        self.dm.mkDir(self.remote_path)
-        self.dm.pushDir(os.path.dirname(self.path), self.remote_path)
+        self._log.debug("Pushing %s to %s..." % (self._path, self._remote_path))
+        self._dm.mkDir(self._remote_path)
+        self._dm.pushDir(posixpath.dirname(self._path), self._remote_path)
 
     def path_to_launch(self):
-        app = os.path.basename(self.path)
-        return os.path.join(self.remote_path, app)
+        app = os.path.basename(self._path)
+        return posixpath.join(self._remote_path, app)
 
 class Package(ApplicationAsset):
+    """Copy an archive to the client and unarchive it."""
 
     def archive_name(self):
-        return os.path.basename(self.path)
+        """Name of the archive file."""
+        return os.path.basename(self._path)
 
     def remote_archive_name(self):
-        return os.path.join(self.remote_path, self.archive_name())
+        """Name of the archive file on the client."""
+        return posixpath.join(self._remote_path, self.archive_name())
 
     def push(self):
-        self.log.debug("Pushing %s to %s..." % (self.path, self.remote_path))
-        self.dm.mkDir(self.remote_path)
-        self.dm.pushFile(self.path, self.remote_archive_name())
+        """Copy the archive file to the remote machine."""
+        self._log.debug("Pushing %s to %s..." % (self._path, self._remote_path))
+        self._dm.mkDir(self._remote_path)
+        self._dm.pushFile(self._path, self.remote_archive_name())
 
     def setup_client(self):
         self.push()
         self.unpack()
 
     def unpack(self):
+        """Unarchive the archive file to a binary directory on the client machine."""
         raise NotImplementedError('Implement unpack()')
 
 class TarBz2(Package):
+    """Intended for Linux packages. Client commands assume Linux."""
 
     def unpack(self):
-        cmd = ['cd', self.remote_path, ';', 'tar', 'xjf', self.remote_archive_name()]
-        self.log.debug("Running %s on remote host.." % cmd)
-        output = self.dm.shellCheckOutput(cmd, env=None)
+        cmd = ['cd', self._remote_path, ';', 'tar', 'xjf', self.remote_archive_name()]
+        self._log.debug("Running %s on remote host.." % cmd)
+        output = self._dm.shellCheckOutput(cmd, env=None)
 
     def path_to_launch(self):
-        return os.path.join(self.remote_path, 'firefox', 'firefox')
+        return posixpath.join(self._remote_path, 'firefox', 'firefox')
 
 class Zip(Package):
+    """Intended for Windows packages. Client commands assume Windows."""
 
     def unpack(self):
-        cmd = ['unzip', '-u', '-o', '-d', self.remote_path, self.remote_archive_name()]
-        self.log.debug("Running %s on remote host.." % cmd)
-        output = self.dm.shellCheckOutput(cmd, env=None)
+        # Note that unzip has to be on the path on the Windows client machine. This comes with
+        # mozilla-build; the negatus package I made includes the unzip binary from mozilla-build.
+        cmd = ['unzip', '-u', '-o', '-d', self._remote_path, self.remote_archive_name()]
+        self._log.debug("Running %s on remote host.." % cmd)
+        output = self._dm.shellCheckOutput(cmd, env=None)
 
     def path_to_launch(self):
-        return os.path.join(self.remote_path, 'firefox', 'firefox.exe')
+        return posixpath.join(self._remote_path, 'firefox', 'firefox.exe')
 
 class Dmg(Package):
+    """Intended for Mac packages. Client commands assume Mac."""
 
     def unpack(self):
+        # Note that these command have the potential to not complete before the next command. It this
+        # turns out to be a problem in practice, we need to use the install script in the build
+        # directory of mozilla-central.
+
         umount_cmd = ['umount', '/Volumes/Steeplechase']
-        self.log.debug("Running %s on remote host.." % umount_cmd)
+        self._log.debug("Running %s on remote host.." % umount_cmd)
         try:
-            output = self.dm.shellCheckOutput(umount_cmd, env=None)
+            output = self._dm.shellCheckOutput(umount_cmd, env=None)
         except Exception as ex:
-            self.log.debug("EXPECTED: umount failed with %s" % ex)
+            self._log.debug("EXPECTED: umount failed with %s" % ex)
+
         cmd = ['hdiutil', 'attach', '-quiet', '-mountpoint', '/Volumes/Steeplechase', self.remote_archive_name()]
-        self.log.debug("Running %s on remote host.." % cmd)
-        output = self.dm.shellCheckOutput(cmd, env=None)
-        cmd = ['cp', '-r', '/Volumes/Steeplechase/*.app', os.path.join(self.remote_path, 'firefox.app')]
-        self.log.debug("Running %s on remote host.." % cmd)
-        output = self.dm.shellCheckOutput(cmd, env=None)
-        self.log.debug("Running %s on remote host.." % umount_cmd)
-        output = self.dm.shellCheckOutput(umount_cmd, env=None)
+        self._log.debug("Running %s on remote host.." % cmd)
+        output = self._dm.shellCheckOutput(cmd, env=None)
+
+        if not self._dm.dirExists('/Volumes/Steeplechase'):
+            raise 'hdiutil attach did not finish before we needed it.'
+
+        cmd = ['cp', '-r', '/Volumes/Steeplechase/*.app', posixpath.join(self._remote_path, 'firefox.app')]
+        self._log.debug("Running %s on remote host.." % cmd)
+        output = self._dm.shellCheckOutput(cmd, env=None)
+        self._log.debug("Running %s on remote host.." % umount_cmd)
+        output = self._dm.shellCheckOutput(umount_cmd, env=None)
 
     def path_to_launch(self):
-        return os.path.join(self.remote_path, 'firefox.app', 'Contents', 'MacOS', 'firefox')
+        return posixpath.join(self._remote_path, 'firefox.app', 'Contents', 'MacOS', 'firefox')
 
-def generate_package_asset(path, remote_path, log, dm):
+def generate_package_asset(path, log, dm):
+    """Factory method to return an asset object to push and unpack the object to the client."""
+
     asset = None
     base, ext = os.path.splitext(path)
-    if ext == '.zip':
-        asset = Zip(path, remote_path, log, dm)
-    elif ext == '.dmg':
-        asset = Dmg(path, remote_path, log, dm)
-    elif ext == '.bz2':
-        real_base, ext2 = os.path.splitext(base)
-        if ext2 == ".tar":
-            asset = TarBz2(path, remote_path, log, dm)
+    if path.endswith('.zip'):
+        asset = Zip(path, log, dm)
+    elif path.endswith('.dmg'):
+        asset = Dmg(path, log, dm)
+    elif path.endswith('.tar.bz2'):
+        asset = TarBz2(path, log, dm)
+    else:
+        raise "generate_packages_asset(%s) called with unknown extension." % path
     return asset
 
 class HTMLTests(object):
@@ -262,7 +300,7 @@ class HTMLTests(object):
                                          addons=[specialpowers_path],
                                          locations=locations)
                 print "Pushing profile to %s..." % info['name']
-                remote_profile_path = os.path.join(info['test_root'], "profile")
+                remote_profile_path = posixpath.join(info['test_root'], "profile")
                 info['dm'].mkDir(remote_profile_path)
                 info['dm'].pushDir(profile_path, remote_profile_path)
                 info['remote_profile_path'] = remote_profile_path
@@ -315,6 +353,52 @@ class HTMLTests(object):
                 self.log.info("<<<<<<<")
         return pass_count, fail_count
 
+def get_package_options(options):
+    """Return a dictionary of package/binary options."""
+
+    package_options = options
+
+    # We have to have either --binary or --package
+    if not package_options.binary and not package_options.package:
+        return None
+
+    # But we can't have both
+    if package_options.binary and package_options.package:
+        return None
+
+    # If we have --binary, but we don't have --binary2 or --package2, use --binary for the second
+    if package_options.binary:
+        if not package_options.binary2 and not package_options.package2:
+            package_options.binary2 = package_options.binary
+
+    # If we have --package, but we don't have --binary2 or --package2, use --package for the second
+    if package_options.package:
+        if not package_options.binary2 and not package_options.package2:
+            package_options.package2 = package_options.package
+
+    # Check for the existence of the two packages.
+    if package_options.binary:
+        if not os.path.isfile(package_options.binary):
+            parser.error("Binary %s does not exist." % package_options.binary)
+            return None
+
+    if package_options.binary2:
+        if not os.path.isfile(package_options.binary2):
+            parser.error("Binary %s does not exist." % package_options.binary2)
+            return None
+
+    if package_options.package:
+        if not os.path.isfile(package_options.package):
+            parser.error("Package %s does not exist." % package_options.package)
+            return None
+
+    if package_options.package2:
+        if not os.path.isfile(package_options.package2):
+            parser.error("Package %s does not exist# % package_options.package2")
+            return None
+
+    return package_options
+
 def main(args):
     parser = Options()
     options, args = parser.parse_args()
@@ -322,41 +406,10 @@ def main(args):
         parser.print_usage()
         return 2
 
-    if not options.binary and not options.package:
+    package_options = get_package_options(options)
+    if not package_options:
         parser.print_usage()
         return 2
-
-    if options.binary and options.package:
-        parser.print_usage()
-        return 2
-
-    if options.binary:
-        if not options.binary2 and not options.package2:
-            options.binary2 = options.binary
-
-    if options.package:
-        if not options.binary2 and not options.package2:
-            options.package2 = options.package
-
-    if options.binary:
-        if not os.path.isfile(options.binary):
-            parser.error("Binary %s does not exist" % options.binary)
-            return 2
-
-    if options.binary2:
-        if not os.path.isfile(options.binary2):
-            parser.error("Binary %s does not exist" % options.binary2)
-            return 2
-
-    if options.package:
-        if not os.path.isfile(options.package):
-            parser.error("Package %s does not exist" % options.package)
-            return 2
-
-    if options.package2:
-        if not os.path.isfile(options.package2):
-            parser.error("Package %s does not exist# % options.package2")
-            return 2
 
     if not os.path.isdir(options.specialpowers):
         parser.error("SpecialPowers directory %s does not exist" % options.specialpowers)
@@ -381,31 +434,27 @@ def main(args):
     else:
         dm2 = DeviceManagerSUT(options.host2)
     remote_info = [{'dm': dm1,
-                    'binary': options.binary,
-                    'package': options.package,
+                    'binary': package_options.binary,
+                    'package': package_options.package,
                     'is_initiator': True,
                     'name': 'Client 1'},
                    {'dm': dm2,
-                    'binary': options.binary2,
-                    'package': options.package2,
+                    'binary': package_options.binary2,
+                    'package': package_options.package2,
                     'is_initiator': False,
                     'name': 'Client 2'}]
     # first, push app
     for info in remote_info:
         dm = info['dm']
-        test_root = os.path.join(dm.getDeviceRoot(), "steeplechase")
-        remote_app_dir = os.path.join(test_root, "app")
-
-        if options.setup:
-            if dm.dirExists(test_root):
-                dm.removeDir(test_root)
-            dm.mkDir(test_root)
-        info['test_root'] = test_root
 
         if info['binary']:
-            asset = Binary(path=info['binary'], remote_path=remote_app_dir, log=log, dm=info['dm'])
+            asset = Binary(path=info['binary'], log=log, dm=info['dm'])
         else:
-            asset = generate_package_asset(path=info['package'], remote_path=remote_app_dir, log=log, dm=info['dm'])
+            asset = generate_package_asset(path=info['package'], log=log, dm=info['dm'])
+
+        if options.setup:
+            asset.setup_test_root()
+        info['test_root'] = asset.test_root()
 
         if options.setup:
             log.info("Pushing app to %s...", info["name"])
