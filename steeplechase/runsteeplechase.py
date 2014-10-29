@@ -119,16 +119,15 @@ class RunThread(threading.Thread):
 class ApplicationAsset(object):
     def __init__(self, path, remote_path, log, dm):
         self.path = path
-        self.remote_path = os.path.join(remote_path)
+        self.remote_path = remote_path
         self.log = log
         self.dm = dm
 
     def setup_client(self):
-        print "Implement push_to_client"
+        raise NotImplementedError('Implement setup_client()')
 
     def path_to_launch(self):
-        print "Implement path_to_launch"
-
+        raise NotImplementedError('Implement path_to_launch()')
 
 class Binary(ApplicationAsset):
 # Note that the legacy --binary gives the full path to the core firefox binary. This does not work on MacOS (now),
@@ -160,8 +159,8 @@ class Package(ApplicationAsset):
         self.push()
         self.unpack()
 
-    def path_to_launch(self):
-        print 'implement path_to_launch...'
+    def unpack(self):
+        raise NotImplementedError('Implement unpack()')
 
 class TarBz2(Package):
 
