@@ -120,11 +120,12 @@ class RunThread(threading.Thread):
 class ApplicationAsset(object):
     """A class for handling the binaries or packages to be installed and run by steeplechase"""
 
-    def __init__(self, path, log, dm):
+    def __init__(self, path, log, dm, name):
         self._path = path
         self._log = log
         self._dm = dm
-        self._test_root = posixpath.join(dm.getDeviceRoot(), "steeplechase")
+        self._name = name
+        self._test_root = posixpath.join(dm.getDeviceRoot(), "steeplechase-" + name)
         self._remote_path = posixpath.join(self._test_root, "app")
 
     def remote_path(self):
@@ -216,12 +217,12 @@ class Dmg(Package):
         # turns out to be a problem in practice, we need to use the install script in the build
         # directory of mozilla-central.
 
-        umount_cmd = ['umount', '/Volumes/Steeplechase']
-        self._log.debug("Running %s on remote host.." % umount_cmd)
+        detach_cmd = ['hdiutil', 'detach', '/Volumes/Steeplechase']
+        self._log.debug("Running %s on remote host.." % detach_cmd)
         try:
-            output = self._dm.shellCheckOutput(umount_cmd, env=None)
+            output = self._dm.shellCheckOutput(detach_cmd, env=None)
         except Exception as ex:
-            self._log.debug("EXPECTED: umount failed with %s" % ex)
+            self._log.debug("EXPECTED: detach failed with %s" % ex)
 
         cmd = ['hdiutil', 'attach', '-quiet', '-mountpoint', '/Volumes/Steeplechase', self.remote_archive_name()]
         self._log.debug("Running %s on remote host.." % cmd)
@@ -233,23 +234,23 @@ class Dmg(Package):
         cmd = ['cp', '-r', '/Volumes/Steeplechase/*.app', posixpath.join(self._remote_path, 'firefox.app')]
         self._log.debug("Running %s on remote host.." % cmd)
         output = self._dm.shellCheckOutput(cmd, env=None)
-        self._log.debug("Running %s on remote host.." % umount_cmd)
-        output = self._dm.shellCheckOutput(umount_cmd, env=None)
+        self._log.debug("Running %s on remote host.." % detach_cmd)
+        output = self._dm.shellCheckOutput(detach_cmd, env=None)
 
     def path_to_launch(self):
         return posixpath.join(self._remote_path, 'firefox.app', 'Contents', 'MacOS', 'firefox')
 
-def generate_package_asset(path, log, dm):
+def generate_package_asset(path, log, dm, name):
     """Factory method to return an asset object to push and unpack the object to the client."""
 
     asset = None
     base, ext = os.path.splitext(path)
     if path.endswith('.zip'):
-        asset = Zip(path, log, dm)
+        asset = Zip(path, log, dm, name)
     elif path.endswith('.dmg'):
-        asset = Dmg(path, log, dm)
+        asset = Dmg(path, log, dm, name)
     elif path.endswith('.tar.bz2'):
-        asset = TarBz2(path, log, dm)
+        asset = TarBz2(path, log, dm, name)
     else:
         raise "generate_packages_asset(%s) called with unknown extension." % path
     return asset
@@ -437,20 +438,20 @@ def main(args):
                     'binary': package_options.binary,
                     'package': package_options.package,
                     'is_initiator': True,
-                    'name': 'Client 1'},
+                    'name': 'Client1'},
                    {'dm': dm2,
                     'binary': package_options.binary2,
                     'package': package_options.package2,
                     'is_initiator': False,
-                    'name': 'Client 2'}]
+                    'name': 'Client2'}]
     # first, push app
     for info in remote_info:
         dm = info['dm']
 
         if info['binary']:
-            asset = Binary(path=info['binary'], log=log, dm=info['dm'])
+            asset = Binary(path=info['binary'], log=log, dm=info['dm'], name=info['name'])
         else:
-            asset = generate_package_asset(path=info['package'], log=log, dm=info['dm'])
+            asset = generate_package_asset(path=info['package'], log=log, dm=info['dm'], name=info['name'])
 
         if options.setup:
             asset.setup_test_root()
