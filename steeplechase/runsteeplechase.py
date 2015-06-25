@@ -354,7 +354,7 @@ class HTMLTests(object):
                 self.log.info("<<<<<<<")
         return pass_count, fail_count
 
-def get_package_options(options):
+def get_package_options(parser, options):
     """Return a dictionary of package/binary options."""
 
     package_options = options
@@ -407,7 +407,7 @@ def main(args):
         parser.print_usage()
         return 2
 
-    package_options = get_package_options(options)
+    package_options = get_package_options(parser, options)
     if not package_options:
         parser.print_usage()
         return 2
