@@ -499,7 +499,7 @@ def main(args):
     log.info("Result summary:")
     log.info("Passed: %d" % pass_count)
     log.info("Failed: %d" % fail_count)
-    return fail_count == 0
+    return pass_count > 0 and fail_count == 0
 
 if __name__ == '__main__':
     sys.exit(0 if main(sys.argv[1:]) else 1)
