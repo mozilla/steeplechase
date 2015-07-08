@@ -4,6 +4,9 @@ var current_window = null;
 var socket;
 var socket_messages = [];
 var socket_message_promises = [];
+var socket_test;
+var socket_messages_test = [];
+var socket_message_promises_test = [];
 var is_initiator = SpecialPowers.getBoolPref("steeplechase.is_initiator");
 
 function fetch_manifest() {
@@ -57,6 +60,85 @@ function socket_message(data) {
   } else {
     socket_messages.push(message);
   }
+}
+
+/*
+ * Receive a single message from |socket|. If
+ * there is a deferred (from wait_for_message)
+ * waiting on it, resolve that deferred. Otherwise
+ * queue the message for a future waiter.
+ */
+function socket_message_test(data) {
+  var message = JSON.parse(data);
+  if (socket_message_promises_test.length > 0) {
+    var res = socket_message_promises_test.shift();
+    res(message);
+  } else {
+    socket_messages_test.push(message);
+  }
+}
+
+/*
+ * Return a promise for the next available message
+ * to come in on |socket|. If there is a queued
+ * message, resolves the promise immediately, otherwise
+ * waits for socket_message_test to receive one.
+ */
+function wait_for_message_test() {
+  return new Promise(resolve => {
+    if (socket_messages_test.length > 0) {
+      resolve(socket_messages_test.shift());
+    } else {
+      socket_message_test_promises.push(resolve);
+    }
+  });
+}
+
+/*
+ * Send an object as a message on |socket|.
+ */
+function send_message_test(data) {
+  socket_test.send(JSON.stringify(data));
+}
+
+function connect_socket_test() {
+  var server = SpecialPowers.getCharPref("steeplechase.signalling_server");
+  if (server.substr(server.length - 1) != "/") {
+    server += "/";
+  }
+  var room = SpecialPowers.getCharPref("steeplechase.signalling_room");
+  var script = server + "socket.io/socket.io.js";
+  return load_script(script).then(function() {
+    return new Promise((resolve, reject) => {
+      socket_test = io.connect(server + "?room=" + room + tests[current_test].path);
+      socket_test.on("connect", function() {
+        socket_test.on("message", socket_message_test);
+        resolve(socket_test);
+      });
+      socket_test.on("error", function() {
+        reject(new Error("socket.io error"));
+      });
+      socket_test.on("connect_failed", function() {
+        reject(new Error("socket failed to connect"));
+      });
+    });
+  }).then(function () {
+    return new Promise((resolve, reject) => {
+      socket_test.once("numclients", function(data) {
+        if (data.clients == 2) {
+          // Other side is already there.
+          resolve(socket_test);
+        } else if (data.clients > 2) {
+          reject(new Error("Too many clients connected"));
+        } else {
+          // Just us, wait for the other side.
+          socket_test.once("client_joined", function() {
+            resolve(socket_test);
+          });
+        }
+      });
+    });
+  });
 }
 
 /*
@@ -146,6 +228,7 @@ function run_next_test() {
     return;
   }
 
+  connect_socket_test();
   var path = tests[current_test].path;
   try {
     current_window = window.open("/tests/" + path);
@@ -156,9 +239,9 @@ function run_next_test() {
   current_window.onerror = test_error;
   current_window.addEventListener("load", function() {
     dump("loaded " + path + "\n");
-    send_message({"action": "test_loaded", "test": path});
+    send_message_test({"action": "test_loaded", "test": path});
     // Wait for other side to have loaded this test.
-    wait_for_message().then(function (m) {
+    wait_for_message_test().then(function (m) {
       if (m.action != "test_loaded") {
         //XXX: should this be fatal?
         harness_error(new Error("Looking for test_loaded, got: " + JSON.stringify(m)));

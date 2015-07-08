@@ -25,3 +25,5 @@ function finish() {
 
 var wait_for_message = window.opener.wait_for_message;
 var send_message = window.opener.send_message;
+var wait_for_message_test = window.opener.wait_for_message_test;
+var send_message_test = window.opener.send_message_test;
