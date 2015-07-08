@@ -89,7 +89,7 @@ function wait_for_message_test() {
     if (socket_messages_test.length > 0) {
       resolve(socket_messages_test.shift());
     } else {
-      socket_message_test_promises.push(resolve);
+      socket_message_promises_test.push(resolve);
     }
   });
 }
