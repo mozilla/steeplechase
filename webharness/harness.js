@@ -78,29 +78,6 @@ function socket_message_test(data) {
   }
 }
 
-/*
- * Return a promise for the next available message
- * to come in on |socket|. If there is a queued
- * message, resolves the promise immediately, otherwise
- * waits for socket_message_test to receive one.
- */
-function wait_for_message_test() {
-  return new Promise(resolve => {
-    if (socket_messages_test.length > 0) {
-      resolve(socket_messages_test.shift());
-    } else {
-      socket_message_promises_test.push(resolve);
-    }
-  });
-}
-
-/*
- * Send an object as a message on |socket|.
- */
-function send_message_test(data) {
-  socket_test.send(JSON.stringify(data));
-}
-
 function connect_socket_test() {
   var server = SpecialPowers.getCharPref("steeplechase.signalling_server");
   if (server.substr(server.length - 1) != "/") {
@@ -239,9 +216,9 @@ function run_next_test() {
   current_window.onerror = test_error;
   current_window.addEventListener("load", function() {
     dump("loaded " + path + "\n");
-    send_message_test({"action": "test_loaded", "test": path});
+    send_message({"action": "test_loaded", "test": path});
     // Wait for other side to have loaded this test.
-    wait_for_message_test().then(function (m) {
+    wait_for_message().then(function (m) {
       if (m.action != "test_loaded") {
         //XXX: should this be fatal?
         harness_error(new Error("Looking for test_loaded, got: " + JSON.stringify(m)));
