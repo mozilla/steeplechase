@@ -86,7 +86,7 @@ function connect_socket_test() {
   var room = SpecialPowers.getCharPref("steeplechase.signalling_room");
   var script = server + "socket.io/socket.io.js";
   return load_script(script).then(function() {
-    return new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
       socket_test = io.connect(server + "?room=" + room + tests[current_test].path);
       socket_test.on("connect", function() {
         socket_test.on("message", socket_message_test);
@@ -98,7 +98,7 @@ function connect_socket_test() {
       socket_test.on("connect_failed", function() {
         reject(new Error("socket failed to connect"));
       });
-    });
+  });
   }).then(function () {
     return new Promise((resolve, reject) => {
       socket_test.once("numclients", function(data) {
@@ -205,33 +205,34 @@ function run_next_test() {
     return;
   }
 
-  connect_socket_test();
-  var path = tests[current_test].path;
-  try {
-    current_window = window.open("/tests/" + path);
-  } catch(ex) {
-    harness_error(ex);
-    return;
-  }
-  current_window.onerror = test_error;
-  current_window.addEventListener("load", function() {
-    dump("loaded " + path + "\n");
-    send_message({"action": "test_loaded", "test": path});
-    // Wait for other side to have loaded this test.
-    wait_for_message().then(function (m) {
-      if (m.action != "test_loaded") {
-        //XXX: should this be fatal?
-        harness_error(new Error("Looking for test_loaded, got: " + JSON.stringify(m)));
-        return;
-      }
-      if (m.test != path) {
-        harness_error(new Error("Wrong test loaded on other side: " + JSON.stringify(m.test)));
-        return;
-      }
-      current_window.run_test(is_initiator);
+  var room_ready = connect_socket_test();
+  room_ready.then(()=>{
+    var path = tests[current_test].path;
+    try {
+      current_window = window.open("/tests/" + path);
+    } catch(ex) {
+      harness_error(ex);
+      return;
+    }
+    current_window.onerror = test_error;
+    current_window.addEventListener("load", function() {
+      dump("loaded " + path + "\n");
+      send_message({"action": "test_loaded", "test": path});
+      // Wait for other side to have loaded this test.
+      wait_for_message().then(function (m) {
+        if (m.action != "test_loaded") {
+          //XXX: should this be fatal?
+          harness_error(new Error("Looking for test_loaded, got: " + JSON.stringify(m)));
+          return;
+        }
+        if (m.test != path) {
+          harness_error(new Error("Wrong test loaded on other side: " + JSON.stringify(m.test)));
+          return;
+        }
+        current_window.run_test(is_initiator);
+      });
     });
-  });
-  //TODO: timeout handling
+  });   
 }
 
 function harness_error(error) {
