@@ -286,6 +286,7 @@ class HTMLTests(object):
         prefs["steeplechase.signalling_server"] = self.options.signalling_server
         prefs["steeplechase.signalling_room"] = str(uuid.uuid4())
         prefs["media.navigator.permission.disabled"] = True
+        prefs["media.navigator.streams.fake"] = True
 
         specialpowers_path = self.options.specialpowers
         threads = []
