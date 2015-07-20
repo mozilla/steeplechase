@@ -195,6 +195,7 @@ function finish() {
 
 function log(message, test, extra) {
   //TODO: make this structured?
+  console.log(message);
   dump(message + "\n");
 }
 
@@ -203,5 +204,6 @@ function log_result(result, message, test) {
                 'message': message,
                 'time': Date.now(),
                 'source_file': test || tests[current_test].path};
+  console.log(JSON.stringify(output));
   dump(JSON.stringify(output) + "\n");
 }
