@@ -1,10 +1,11 @@
 var tests = [];
 var current_test = -1;
 var current_window = null;
-var socket;
+var socket = {};
 var socket_messages = [];
 var socket_message_promises = [];
 var is_initiator = SpecialPowers.getBoolPref("steeplechase.is_initiator");
+var type;
 
 function fetch_manifest() {
   return new Promise((resolve, reject) => {
@@ -59,6 +60,7 @@ function socket_message(data) {
   }
 }
 
+
 /*
  * Return a promise for the next available message
  * to come in on |socket|. If there is a queued
@@ -79,10 +81,10 @@ function wait_for_message() {
  * Send an object as a message on |socket|.
  */
 function send_message(data) {
-  socket.send(JSON.stringify(data));
+  socket["administration"].send(JSON.stringify(data));
 }
 
-function connect_socket() {
+function connect_socket(type) {
   var server = SpecialPowers.getCharPref("steeplechase.signalling_server");
   if (server.substr(server.length - 1) != "/") {
     server += "/";
@@ -91,30 +93,34 @@ function connect_socket() {
   var script = server + "socket.io/socket.io.js";
   return load_script(script).then(function() {
     return new Promise((resolve, reject) => {
-      socket = io.connect(server + "?room=" + room);
-      socket.on("connect", function() {
-        socket.on("message", socket_message);
-        resolve(socket);
+      if (type == "test") {
+          socket[type] = io.connect(server + "?room=" + room + tests[current_test].path);
+      } else {
+          socket[type] = io.connect(server + "?room=" + room);
+      }
+      socket[type].on("connect", function() {
+        socket[type].on("message", socket_message);
+        resolve(socket[type]);
       });
-      socket.on("error", function() {
+      socket[type].on("error", function() {
         reject(new Error("socket.io error"));
       });
-      socket.on("connect_failed", function() {
+      socket[type].on("connect_failed", function() {
         reject(new Error("socket failed to connect"));
       });
     });
   }).then(function () {
     return new Promise((resolve, reject) => {
-      socket.once("numclients", function(data) {
+      socket[type].once("numclients", function(data) {
         if (data.clients == 2) {
           // Other side is already there.
-          resolve(socket);
+          resolve(socket[type]);
         } else if (data.clients > 2) {
           reject(new Error("Too many clients connected"));
         } else {
           // Just us, wait for the other side.
-          socket.once("client_joined", function() {
-            resolve(socket);
+          socket[type].once("client_joined", function() {
+            resolve(socket[type]);
           });
         }
       });
@@ -123,7 +129,7 @@ function connect_socket() {
 }
 
 Promise.all([fetch_manifest(),
-             connect_socket()]).then(run_tests,
+             connect_socket("administration")]).then(run_tests,
                                      harness_error);
 
 function run_tests(results) {
@@ -146,32 +152,34 @@ function run_next_test() {
     return;
   }
 
-  var path = tests[current_test].path;
-  try {
-    current_window = window.open("/tests/" + path);
-  } catch(ex) {
-    harness_error(ex);
-    return;
-  }
-  current_window.onerror = test_error;
-  current_window.addEventListener("load", function() {
-    dump("loaded " + path + "\n");
-    send_message({"action": "test_loaded", "test": path});
-    // Wait for other side to have loaded this test.
-    wait_for_message().then(function (m) {
-      if (m.action != "test_loaded") {
-        //XXX: should this be fatal?
-        harness_error(new Error("Looking for test_loaded, got: " + JSON.stringify(m)));
-        return;
-      }
-      if (m.test != path) {
-        harness_error(new Error("Wrong test loaded on other side: " + JSON.stringify(m.test)));
-        return;
-      }
-      current_window.run_test(is_initiator);
+  var room_ready = connect_socket("test");
+  room_ready.then(()=>{
+    var path = tests[current_test].path;
+    try {
+      current_window = window.open("/tests/" + path);
+    } catch(ex) {
+      harness_error(ex);
+      return;
+    }
+    current_window.onerror = test_error;
+    current_window.addEventListener("load", function() {
+      dump("loaded " + path + "\n");
+      send_message({"action": "test_loaded", "test": path});
+      // Wait for other side to have loaded this test.
+      wait_for_message().then(function (m) {
+        if (m.action != "test_loaded") {
+          //XXX: should this be fatal?
+          harness_error(new Error("Looking for test_loaded, got: " + JSON.stringify(m)));
+          return;
+        }
+        if (m.test != path) {
+          harness_error(new Error("Wrong test loaded on other side: " + JSON.stringify(m.test)));
+          return;
+        }
+        current_window.run_test(is_initiator);
+      });
     });
-  });
-  //TODO: timeout handling
+  });   
 }
 
 function harness_error(error) {
