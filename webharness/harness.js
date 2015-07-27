@@ -1,13 +1,11 @@
 var tests = [];
 var current_test = -1;
 var current_window = null;
-var socket;
+var socket = {};
 var socket_messages = [];
 var socket_message_promises = [];
-var socket_test;
-var socket_messages_test = [];
-var socket_message_promises_test = [];
 var is_initiator = SpecialPowers.getBoolPref("steeplechase.is_initiator");
+var type;
 
 function fetch_manifest() {
   return new Promise((resolve, reject) => {
@@ -62,61 +60,6 @@ function socket_message(data) {
   }
 }
 
-/*
- * Receive a single message from |socket|. If
- * there is a deferred (from wait_for_message)
- * waiting on it, resolve that deferred. Otherwise
- * queue the message for a future waiter.
- */
-function socket_message_test(data) {
-  var message = JSON.parse(data);
-  if (socket_message_promises_test.length > 0) {
-    var res = socket_message_promises_test.shift();
-    res(message);
-  } else {
-    socket_messages_test.push(message);
-  }
-}
-
-function connect_socket_test() {
-  var server = SpecialPowers.getCharPref("steeplechase.signalling_server");
-  if (server.substr(server.length - 1) != "/") {
-    server += "/";
-  }
-  var room = SpecialPowers.getCharPref("steeplechase.signalling_room");
-  var script = server + "socket.io/socket.io.js";
-  return load_script(script).then(function() {
-  return new Promise((resolve, reject) => {
-      socket_test = io.connect(server + "?room=" + room + tests[current_test].path);
-      socket_test.on("connect", function() {
-        socket_test.on("message", socket_message_test);
-        resolve(socket_test);
-      });
-      socket_test.on("error", function() {
-        reject(new Error("socket.io error"));
-      });
-      socket_test.on("connect_failed", function() {
-        reject(new Error("socket failed to connect"));
-      });
-  });
-  }).then(function () {
-    return new Promise((resolve, reject) => {
-      socket_test.once("numclients", function(data) {
-        if (data.clients == 2) {
-          // Other side is already there.
-          resolve(socket_test);
-        } else if (data.clients > 2) {
-          reject(new Error("Too many clients connected"));
-        } else {
-          // Just us, wait for the other side.
-          socket_test.once("client_joined", function() {
-            resolve(socket_test);
-          });
-        }
-      });
-    });
-  });
-}
 
 /*
  * Return a promise for the next available message
@@ -138,10 +81,10 @@ function wait_for_message() {
  * Send an object as a message on |socket|.
  */
 function send_message(data) {
-  socket.send(JSON.stringify(data));
+  socket["administration"].send(JSON.stringify(data));
 }
 
-function connect_socket() {
+function connect_socket(type) {
   var server = SpecialPowers.getCharPref("steeplechase.signalling_server");
   if (server.substr(server.length - 1) != "/") {
     server += "/";
@@ -150,30 +93,34 @@ function connect_socket() {
   var script = server + "socket.io/socket.io.js";
   return load_script(script).then(function() {
     return new Promise((resolve, reject) => {
-      socket = io.connect(server + "?room=" + room);
-      socket.on("connect", function() {
-        socket.on("message", socket_message);
-        resolve(socket);
+      if (type == "test") {
+          socket[type] = io.connect(server + "?room=" + room + tests[current_test].path);
+      } else {
+          socket[type] = io.connect(server + "?room=" + room);
+      }
+      socket[type].on("connect", function() {
+        socket[type].on("message", socket_message);
+        resolve(socket[type]);
       });
-      socket.on("error", function() {
+      socket[type].on("error", function() {
         reject(new Error("socket.io error"));
       });
-      socket.on("connect_failed", function() {
+      socket[type].on("connect_failed", function() {
         reject(new Error("socket failed to connect"));
       });
     });
   }).then(function () {
     return new Promise((resolve, reject) => {
-      socket.once("numclients", function(data) {
+      socket[type].once("numclients", function(data) {
         if (data.clients == 2) {
           // Other side is already there.
-          resolve(socket);
+          resolve(socket[type]);
         } else if (data.clients > 2) {
           reject(new Error("Too many clients connected"));
         } else {
           // Just us, wait for the other side.
-          socket.once("client_joined", function() {
-            resolve(socket);
+          socket[type].once("client_joined", function() {
+            resolve(socket[type]);
           });
         }
       });
@@ -182,7 +129,7 @@ function connect_socket() {
 }
 
 Promise.all([fetch_manifest(),
-             connect_socket()]).then(run_tests,
+             connect_socket("administration")]).then(run_tests,
                                      harness_error);
 
 function run_tests(results) {
@@ -205,7 +152,7 @@ function run_next_test() {
     return;
   }
 
-  var room_ready = connect_socket_test();
+  var room_ready = connect_socket("test");
   room_ready.then(()=>{
     var path = tests[current_test].path;
     try {
