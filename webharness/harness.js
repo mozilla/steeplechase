@@ -5,6 +5,7 @@ var socket;
 var socket_messages = [];
 var socket_message_promises = [];
 var is_initiator = SpecialPowers.getBoolPref("steeplechase.is_initiator");
+var timeout = SpecialPowers.getIntPref("steeplechase.timeout");
 
 function fetch_manifest() {
   return new Promise((resolve, reject) => {
@@ -168,7 +169,7 @@ function run_next_test() {
         harness_error(new Error("Wrong test loaded on other side: " + JSON.stringify(m.test)));
         return;
       }
-      current_window.run_test(is_initiator);
+      current_window.run_test(is_initiator,timeout);
     });
   });
   //TODO: timeout handling
