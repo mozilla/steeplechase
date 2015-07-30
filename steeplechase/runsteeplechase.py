@@ -73,6 +73,9 @@ class Options(OptionParser):
         self.add_option("--save-logs-to",
                         action="store", type="string", dest="log_dest",
                         help="save client logs to this directory")
+        self.add_option("--timeout",
+                        action="store", type="int", dest="timeout",
+                        help="numerical value representing the steeplechase script timeout")
 
         self.set_usage(usage)
 
@@ -285,6 +288,12 @@ class HTMLTests(object):
           prefs[pref] = Preferences.cast(prefs[pref])
         prefs["steeplechase.signalling_server"] = self.options.signalling_server
         prefs["steeplechase.signalling_room"] = str(uuid.uuid4())
+        try:
+            self.options.timeout
+        except:
+            prefs["steeplechase.timeout"] = 30000 
+        else:
+            prefs["steeplechase.timeout"] = self.options.timeout
         prefs["media.navigator.permission.disabled"] = True
 
         specialpowers_path = self.options.specialpowers
