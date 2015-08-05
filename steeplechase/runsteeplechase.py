@@ -288,10 +288,8 @@ class HTMLTests(object):
           prefs[pref] = Preferences.cast(prefs[pref])
         prefs["steeplechase.signalling_server"] = self.options.signalling_server
         prefs["steeplechase.signalling_room"] = str(uuid.uuid4())
-        try:
-            self.options.timeout
-        except:
-            prefs["steeplechase.timeout"] = 30000
+        if self.options.timeout is None:
+           prefs["steeplechase.timeout"] = 30000
         else:
             prefs["steeplechase.timeout"] = self.options.timeout
         prefs["media.navigator.permission.disabled"] = True
