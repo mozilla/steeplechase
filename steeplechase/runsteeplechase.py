@@ -60,6 +60,12 @@ class Options(OptionParser):
         self.add_option("--signalling-server",
                         action="store", type="string", dest="signalling_server",
                         help="signalling server URL to use for tests")
+        self.add_option("--negatus2host1",
+                        action="store", type="string", dest="negatus2host1",
+                        help="first remote host to kill firefoxes on")
+        self.add_option("--negatus2host2",
+                        action="store", type="string", dest="negatus2host2",
+                        help="second remote host to kill firefoxes on")
         self.add_option("--noSetup",
                         action="store_false", dest="setup",
                         default="True",
@@ -76,6 +82,9 @@ class Options(OptionParser):
         self.add_option("--timeout",
                         action="store", type="int", dest="timeout",
                         help="numerical value representing the steeplechase script timeout")
+        self.add_option("--killall",
+                        action="store", type="int", dest="killall",
+                        help="boolean value representing whether we want to kill all existing firefoxes")
 
         self.set_usage(usage)
 
@@ -119,6 +128,39 @@ class RunThread(threading.Thread):
             cond.notify()
             cond.release()
             del self.args
+
+def KillFirefoxesCommand(dm,os_type):
+    # Check if we are running on windows client
+    if os_type == "windows":
+        # Note - the below command only works if the "kill" 
+        # utlity is pre-installed in the Systems folder/environment path.
+        cmd = ['kill','firefox']
+        kill_output = dm.shellCheckOutput(cmd, env=None)
+    else:
+        cmd = ['killall','firefox']
+        kill_output = dm.shellCheckOutput(cmd, env=None)
+    return
+
+def GetOStypes(path):
+    os_type = []
+    if path.binary is None:
+       if path.package is not None:
+          if path.package.endswith('.zip'):
+              os_type.append("windows")
+          else:
+              os_type.append("linux/mac")
+    else:
+         os_type.append("linux/mac")
+
+    if path.binary2 is None:
+       if path.package2 is not None:
+          if path.package2.endswith('.zip'):
+              os_type.append("windows")
+          else:
+              os_type.append("linux/mac")
+    else:
+         os_type.append("linux/mac")
+    return os_type
 
 class ApplicationAsset(object):
     """A class for handling the binaries or packages to be installed and run by steeplechase"""
@@ -429,6 +471,26 @@ def main(args):
     if options.log_dest and not os.path.isdir(options.log_dest):
         parser.error("Log directory %s does not exist" % options.log_dest)
         return 2
+
+    if (options.killall is not None) and (options.killall == 1):
+        # Extract the information of second Negatus running on client machines
+        # The Device Manager objects extracted from here will be used to kill
+        # any firefox instances running on the client machines if the 'killall'
+        # flag is set to 1(default being 0).
+        if ':' in options.negatus2host1:
+            host, port = options.negatus2host1.split(':')
+            kill_dm1 = DeviceManagerSUT(host, port)
+        else:
+            kill_dm1 = DeviceManagerSUT(options.negatus2host1)
+            if ':' in options.negatus2host2:
+                host, port = options.negatus2host2.split(':')
+                kill_dm2 = DeviceManagerSUT(host, port)
+            else:
+                kill_dm2 = DeviceManagerSUT(options.negatus2host2)
+            os_type = GetOStypes(package_options)
+            print ("OS types of machine1 is "+os_type[0]+"and machine 2 is"+os_type[1]);
+            KillFirefoxesCommand(kill_dm1,os_type[0])
+            KillFirefoxesCommand(kill_dm2,os_type[1])
 
     log = mozlog.getLogger('steeplechase')
     log.setLevel(mozlog.DEBUG)
