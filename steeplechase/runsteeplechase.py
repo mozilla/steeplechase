@@ -60,12 +60,6 @@ class Options(OptionParser):
         self.add_option("--signalling-server",
                         action="store", type="string", dest="signalling_server",
                         help="signalling server URL to use for tests")
-        self.add_option("--negatus2host1",
-                        action="store", type="string", dest="negatus2host1",
-                        help="first remote host to kill firefoxes on")
-        self.add_option("--negatus2host2",
-                        action="store", type="string", dest="negatus2host2",
-                        help="second remote host to kill firefoxes on")
         self.add_option("--noSetup",
                         action="store_false", dest="setup",
                         default="True",
@@ -453,6 +447,8 @@ def get_package_options(parser, options):
 def main(args):
     parser = Options()
     options, args = parser.parse_args()
+    kill_port = 20703
+
     if not options.html_manifest or not options.specialpowers or not options.host1 or not options.host2 or not options.signalling_server:
         parser.print_usage()
         return 2
@@ -472,38 +468,27 @@ def main(args):
         parser.error("Log directory %s does not exist" % options.log_dest)
         return 2
 
-    if (options.killall is not None) and (options.killall == 1):
-        # Extract the information of second Negatus running on client machines
-        # The Device Manager objects extracted from here will be used to kill
-        # any firefox instances running on the client machines if the 'killall'
-        # flag is set to 1(default being 0).
-        if ':' in options.negatus2host1:
-            host, port = options.negatus2host1.split(':')
-            kill_dm1 = DeviceManagerSUT(host, port)
-        else:
-            kill_dm1 = DeviceManagerSUT(options.negatus2host1)
-            if ':' in options.negatus2host2:
-                host, port = options.negatus2host2.split(':')
-                kill_dm2 = DeviceManagerSUT(host, port)
-            else:
-                kill_dm2 = DeviceManagerSUT(options.negatus2host2)
-            os_type = GetOStypes(package_options)
-            print ("OS types of machine1 is "+os_type[0]+"and machine 2 is"+os_type[1]);
-            KillFirefoxesCommand(kill_dm1,os_type[0])
-            KillFirefoxesCommand(kill_dm2,os_type[1])
-
     log = mozlog.getLogger('steeplechase')
     log.setLevel(mozlog.DEBUG)
     if ':' in options.host1:
-        host, port = options.host1.split(':')
-        dm1 = DeviceManagerSUT(host, port)
+        host1, port = options.host1.split(':')
+        dm1 = DeviceManagerSUT(host1, port)
     else:
         dm1 = DeviceManagerSUT(options.host1)
     if ':' in options.host2:
-        host, port = options.host2.split(':')
-        dm2 = DeviceManagerSUT(host, port)
+        host2, port = options.host2.split(':')
+        dm2 = DeviceManagerSUT(host2, port)
     else:
         dm2 = DeviceManagerSUT(options.host2)
+
+    if (options.killall is not None) and (options.killall == 1):
+        kill_dm1 = DeviceManagerSUT(host1, kill_port)
+        kill_dm2 = DeviceManagerSUT(host2, kill_port)
+        os_type = GetOStypes(package_options)
+        print ("OS type of host1 is "+os_type[0]+" and host2 is "+os_type[1]);
+        KillFirefoxesCommand(kill_dm1,os_type[0])
+        KillFirefoxesCommand(kill_dm2,os_type[1])
+
     remote_info = [{'dm': dm1,
                     'binary': package_options.binary,
                     'package': package_options.package,
