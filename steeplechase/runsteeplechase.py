@@ -76,6 +76,9 @@ class Options(OptionParser):
         self.add_option("--timeout",
                         action="store", type="int", dest="timeout",
                         help="numerical value representing the steeplechase script timeout")
+        self.add_option("--killall",
+                        action="store", type="int", dest="killall",
+                        help="boolean value representing whether we want to kill all existing firefoxes")
 
         self.set_usage(usage)
 
@@ -119,6 +122,39 @@ class RunThread(threading.Thread):
             cond.notify()
             cond.release()
             del self.args
+
+def KillFirefoxesCommand(dm,os_type):
+    # Check if we are running on windows client
+    if os_type == "windows":
+        # Note - the below command only works if the "kill" 
+        # utlity is pre-installed in the Systems folder/environment path.
+        cmd = ['kill','firefox']
+        kill_output = dm.shellCheckOutput(cmd, env=None)
+    else:
+        cmd = ['killall','firefox']
+        kill_output = dm.shellCheckOutput(cmd, env=None)
+    return
+
+def GetOStypes(path):
+    os_type = []
+    if path.binary is None:
+       if path.package is not None:
+          if path.package.endswith('.zip'):
+              os_type.append("windows")
+          else:
+              os_type.append("linux/mac")
+    else:
+         os_type.append("linux/mac")
+
+    if path.binary2 is None:
+       if path.package2 is not None:
+          if path.package2.endswith('.zip'):
+              os_type.append("windows")
+          else:
+              os_type.append("linux/mac")
+    else:
+         os_type.append("linux/mac")
+    return os_type
 
 class ApplicationAsset(object):
     """A class for handling the binaries or packages to be installed and run by steeplechase"""
@@ -411,6 +447,8 @@ def get_package_options(parser, options):
 def main(args):
     parser = Options()
     options, args = parser.parse_args()
+    kill_port = 20703
+
     if not options.html_manifest or not options.specialpowers or not options.host1 or not options.host2 or not options.signalling_server:
         parser.print_usage()
         return 2
@@ -433,15 +471,24 @@ def main(args):
     log = mozlog.getLogger('steeplechase')
     log.setLevel(mozlog.DEBUG)
     if ':' in options.host1:
-        host, port = options.host1.split(':')
-        dm1 = DeviceManagerSUT(host, port)
+        host1, port = options.host1.split(':')
+        dm1 = DeviceManagerSUT(host1, port)
     else:
         dm1 = DeviceManagerSUT(options.host1)
     if ':' in options.host2:
-        host, port = options.host2.split(':')
-        dm2 = DeviceManagerSUT(host, port)
+        host2, port = options.host2.split(':')
+        dm2 = DeviceManagerSUT(host2, port)
     else:
         dm2 = DeviceManagerSUT(options.host2)
+
+    if (options.killall is not None) and (options.killall == 1):
+        kill_dm1 = DeviceManagerSUT(host1, kill_port)
+        kill_dm2 = DeviceManagerSUT(host2, kill_port)
+        os_type = GetOStypes(package_options)
+        print ("OS type of host1 is "+os_type[0]+" and host2 is "+os_type[1]);
+        KillFirefoxesCommand(kill_dm1,os_type[0])
+        KillFirefoxesCommand(kill_dm2,os_type[1])
+
     remote_info = [{'dm': dm1,
                     'binary': package_options.binary,
                     'package': package_options.package,
