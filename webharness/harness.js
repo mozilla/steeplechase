@@ -8,8 +8,8 @@ var socket_message_promises_admin = [];
 var socket_message_promises_test = [];
 var is_initiator = SpecialPowers.getBoolPref("steeplechase.is_initiator");
 var timeout = SpecialPowers.getIntPref("steeplechase.timeout");
+var adminroom = SpecialPowers.getCharPref("steeplechase.signalling_room");
 var loadedscripts = {};
-var adminroom;
 var testroom;
 
 function fetch_manifest() {
@@ -122,21 +122,22 @@ function wait_for_test_message() {
 }
 
 /*
- * Send an object as a message on |socket|.
+ * This methods sends a message to the socket server with the information to 
+ * broadcast to all clients in that room.
  */
 function send_message(room_to_send,data) {
-  socket.emit('message', {room: room_to_send, msg: JSON.stringify(data)});
+	socket.emit('message_to_server', JSON.stringify({room: room_to_send, msg: JSON.stringify(data)}));
 }
 
 /*
-* Send an object as a message on |socket|.
+* Send an object as an admin message on |socket|.
 */
 function send_admin_message(data) {
   send_message(adminroom,data);
 }
 
 /*
-* Send an object as a message on |socket|.
+* Send an object as a test message on |socket|.
 */
 function send_test_message(data) {
   send_message(testroom,data);
@@ -148,7 +149,6 @@ function connect_socket(type) {
   if (server.substr(server.length - 1) != "/") {
     server += "/";
   }
-  var adminroom = SpecialPowers.getCharPref("steeplechase.signalling_room");
   var script = server + "socket.io/socket.io.js";
   return load_script(script).then(function() {
     return new Promise((resolve, reject) => {
@@ -156,15 +156,19 @@ function connect_socket(type) {
           testroom = adminroom+tests[current_test].path;
           socket.emit('subscribe', testroom);
       } else {
-          socket = io.connect(server);
-          socket.emit('subscribe', adminroom);
+        socket = io.connect(server);
+        socket.emit('subscribe', adminroom);
+        socket.on("message", function(data_string){
+          data_full = JSON.parse(data_string);
+          if ( data_full.room === testroom){
+            dump("Comes into testroom");
+            socket_message_test(JSON.stringify(data_full.msg));
+          } else if (data_full.room === adminroom){
+            socket_message_admin(JSON.stringify(data_full.msg));
+          }
+        }); 
       }
       socket.on('subscribed', function(data) {
-        if (type == "test"){
-          socket.on("message", socket_message_test);
-        } else {
-          socket.on("message", socket_message_admin);
-        }
         resolve(socket);
       });
       socket.on("error", function() {
@@ -176,7 +180,7 @@ function connect_socket(type) {
     });
   }).then(function () {
     return new Promise((resolve, reject) => {
-      socket.on('numclients', function(data) {
+      socket.once("numclients", function(data) {
         if (data.clients == 2) {
           // Other side is already there.
           resolve(socket);
@@ -184,7 +188,7 @@ function connect_socket(type) {
           reject(new Error("Too many clients connected"));
         } else {
           // Just us, wait for the other side.
-          socket.on("client_joined", function() {
+          socket.once("client_joined", function() {
             resolve(socket);
           });
         }
@@ -240,10 +244,12 @@ function run_next_test() {
           harness_error(new Error("Wrong test loaded on other side: " + JSON.stringify(m.test)));
           return;
         }
+        console.log("Starting test here");
         current_window.run_test(is_initiator,timeout);
       });
     });
   });
+  //TODO: timeout handling
 }
 
 function harness_error(error) {
@@ -257,28 +263,9 @@ addEventListener("error", harness_error);
 // Called by tests via test.js.
 function test_finished() {
   socket.emit('unsubscribe', testroom);
-  var clients_exited = new Promise((resolve, reject) => {
-      socket.on('numclients', function(data) {
-        if (data.clients == 0) {
-          // Other side is already there.
-          resolve();
-        } else if (data.clients > 2) {
-          reject(new Error("Too many clients in the room"));
-        } else {
-          // Just us, wait for the other side.
-          socket.on("client_exited", function() {
-            console.log("Comes to client exit");
-            resolve();
-          });
-        }
-      });
-    });
-  clients_exited.then(function() {
-  console.log("Comes to client exit");
   current_window.close();
   current_window = null;
   setTimeout(run_next_test, 0);
-  });
 }
 
 function finish() {
