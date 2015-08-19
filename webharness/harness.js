@@ -161,10 +161,11 @@ function connect_socket(type) {
         socket.on("message", function(data_string){
           data_full = JSON.parse(data_string);
           if ( data_full.room === testroom){
-            dump("Comes into testroom");
             socket_message_test(JSON.stringify(data_full.msg));
           } else if (data_full.room === adminroom){
             socket_message_admin(JSON.stringify(data_full.msg));
+          } else {
+            reject(new Error("Unrecognized room: "+JSON.stringify(data_full.msg)));
           }
         }); 
       }
@@ -244,7 +245,6 @@ function run_next_test() {
           harness_error(new Error("Wrong test loaded on other side: " + JSON.stringify(m.test)));
           return;
         }
-        console.log("Starting test here");
         current_window.run_test(is_initiator,timeout);
       });
     });
