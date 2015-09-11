@@ -12,6 +12,7 @@ from mozhttpd.handlers import json_response
 from Queue import Queue
 
 import json
+import logging
 import mozfile
 import mozinfo
 import mozlog
@@ -468,8 +469,8 @@ def main(args):
         parser.error("Log directory %s does not exist" % options.log_dest)
         return 2
 
-    log = mozlog.getLogger('steeplechase')
-    log.setLevel(mozlog.DEBUG)
+    log = mozlog.unstructured.getLogger('steeplechase')
+    log.setLevel(logging.DEBUG)
     if ':' in options.host1:
         host1, port = options.host1.split(':')
         dm1 = DeviceManagerSUT(host1, port)
