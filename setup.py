@@ -15,12 +15,12 @@ version = "1.0"
 
 dependencies = ['mozhttpd',
                 'mozfile',
-                'mozlog',
+                'mozlog>=3.0',
                 'moznetwork',
-                'mozprofile',
+                'mozprofile>=0.27',
                 'mozprocess',
                 'mozrunner',
-                'mozdevice>=0.40',
+                'mozdevice>=0.46',
                ]
 
 setup(name='steeplechase',
